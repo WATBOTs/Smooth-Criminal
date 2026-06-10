@@ -49,6 +49,7 @@
 
 #define BATTERY_ADC_PIN A0                        //Pin for battery monitor (if enabled)
 
+#define IR_SENSOR_PIN 2                           //Pin for IR sensor
 
 //----------THROTTLE CONFIGURATION----------
 //THROTTLE_TYPE / High-speed PWM motor driver support:
