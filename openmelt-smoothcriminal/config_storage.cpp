@@ -22,6 +22,7 @@
 
 #define EEPROM_HEADING_LED_LOC 2
 
+/* 
 //bytes for float
 #define EEPROM_ACCEL_RADIUS_BYTE1_LOC 3
 #define EEPROM_ACCEL_RADIUS_BYTE2_LOC 4
@@ -33,7 +34,7 @@
 #define EEPROM_ACCEL_OFFSET_BYTE2_LOC 8
 #define EEPROM_ACCEL_OFFSET_BYTE3_LOC 9
 #define EEPROM_ACCEL_OFFSET_BYTE4_LOC 10
-
+*/
 
 //indicates values saved to EEPROM (doing 2x)
 static void write_sentinel() {
@@ -49,10 +50,8 @@ static int check_sentinel() {
   return 1;
 }
 
-void save_settings_to_eeprom(int led_offset, float accel_radius, float accel_zero_g_offset) {
+void save_settings_to_eeprom(int led_offset) {
   EEPROM.write(EEPROM_HEADING_LED_LOC, led_offset);
-  EEPROM.put(EEPROM_ACCEL_RADIUS_BYTE1_LOC, accel_radius);
-  EEPROM.put(EEPROM_ACCEL_OFFSET_BYTE1_LOC, accel_zero_g_offset);
   write_sentinel();
 }
 
@@ -62,6 +61,7 @@ int load_heading_led_offset() {
   return EEPROM.read(EEPROM_HEADING_LED_LOC);
 }
 
+/* 
 float load_accel_zero_g_offset() {
   //if value hasn't been saved previously - return the default
   if (check_sentinel() != 1) return DEFAULT_ACCEL_ZERO_G_OFFSET;
@@ -77,5 +77,6 @@ float load_accel_mount_radius() {
   accel_radius = EEPROM.get(EEPROM_ACCEL_RADIUS_BYTE1_LOC, accel_radius);
   return accel_radius;
 }
+*/
 
 #endif

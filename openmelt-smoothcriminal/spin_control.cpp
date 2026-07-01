@@ -6,22 +6,17 @@
 #include "motor_driver.h"
 #include "rc_handler.h"
 #include "spin_control.h"
-#include "accel_handler.h"
 #include "config_storage.h"
 #include "led_driver.h"
 #include "battery_monitor.h"
 #include "heading_estimator.h"
 #include "IR_handler.h"
 
-#define ACCEL_MOUNT_RADIUS_MINIMUM_CM 0.2                 //Never allow interactive config to set below this value
-#define LEFT_RIGHT_CONFIG_RADIUS_ADJUST_DIVISOR 50.0f     //How quick accel. radius is adjusted in config mode (larger values = slower)
 #define LEFT_RIGHT_CONFIG_LED_ADJUST_DIVISOR 0.1f         //How quick LED heading is adjusted in config mode (larger values = slower)
 
 #define MAX_TRANSLATION_ROTATION_INTERVAL_US (1.0f / MIN_TRANSLATION_RPM) * 60 * 1000 * 1000
 #define MAX_TRACKING_ROTATION_INTERVAL_US MAX_TRANSLATION_ROTATION_INTERVAL_US * 2   //don't track heading if we are this slow (also puts upper limit on time spent in melty loop for safety)
 
-static float accel_mount_radius_cm = DEFAULT_ACCEL_MOUNT_RADIUS_CM;
-static float accel_zero_g_offset = DEFAULT_ACCEL_ZERO_G_OFFSET;
 static float led_offset_percent = DEFAULT_LED_OFFSET_PERCENT;         //stored in EEPROM as an INT - but handled as a float for configuration purposes
 
 static unsigned int highest_rpm = 0;
@@ -30,8 +25,6 @@ static bool config_mode = false;   //1 if we are in config mode
 //loads settings from EEPROM
 void load_melty_config_settings() {
 #ifdef ENABLE_EEPROM_STORAGE 
-  accel_mount_radius_cm = load_accel_mount_radius();
-  accel_zero_g_offset = load_accel_zero_g_offset();
   led_offset_percent = load_heading_led_offset();
 #endif  
 }
@@ -39,26 +32,12 @@ void load_melty_config_settings() {
 //saves settings to EEPROM
 void save_melty_config_settings() {
 #ifdef ENABLE_EEPROM_STORAGE 
-  save_settings_to_eeprom(led_offset_percent, accel_mount_radius_cm, accel_zero_g_offset);
+  save_settings_to_eeprom(led_offset_percent);
 #endif  
-}
-
-//updated the expected accelerometer reading for 0g 
-//assumes robot is not spinning when config mode is entered
-//value saved to EEPROM on config mode exit
-static void update_accel_zero_g_offset(){
-  int offset_samples = 200;
-  for (int accel_sample_loop = 0; accel_sample_loop < offset_samples; accel_sample_loop ++) {
-    accel_zero_g_offset += get_accel_force_g();
-  }
-  accel_zero_g_offset = accel_zero_g_offset / offset_samples;
 }
 
 void toggle_config_mode() {
   config_mode = !config_mode;
-
-  //on entering config mode - update the zero g offset
-  if (config_mode) update_accel_zero_g_offset();
   
   //enterring or exiting config mode also resets highest observed RPM
   highest_rpm = 0;
@@ -89,13 +68,12 @@ static float get_rotation_interval_ms() {
   return rotation_interval;
 }
 
-
 //performs changes to melty parameters when in config mode
 static struct melty_parameters_t handle_config_mode(struct melty_parameters_t melty_parameters) {
 
   //if forback forward - normal drive (for driver testing - no adjustment of melty parameters)
 
-  //if forback neutral - then do radius adjustment (unnecessary for IR sensor)
+  //if forback neutral - N/A
   
   //if forback backward - do LED heading adjustment (don't translate)
   if (melty_parameters.translate_forback == RC_FORBACK_BACKWARD) {
