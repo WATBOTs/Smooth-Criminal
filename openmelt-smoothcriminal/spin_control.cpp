@@ -10,6 +10,8 @@
 #include "config_storage.h"
 #include "led_driver.h"
 #include "battery_monitor.h"
+#include "heading_estimator.h"
+#include "IR_handler.h"
 
 #define ACCEL_MOUNT_RADIUS_MINIMUM_CM 0.2                 //Never allow interactive config to set below this value
 #define LEFT_RIGHT_CONFIG_RADIUS_ADJUST_DIVISOR 50.0f     //How quick accel. radius is adjusted in config mode (larger values = slower)
@@ -70,31 +72,19 @@ int get_max_rpm() {
   return highest_rpm;
 }
 
-//calculates time for this rotation of robot
-//robot is steered by increasing / decreasing rotation by factor relative to RC left / right position
-//ie - reducing rotation time estimate below actual results in shift of heading opposite the direction of rotation
-static float get_rotation_interval_ms(int steering_disabled) {
-  
-  float radius_adjustment_factor = 0;
+//calculates time for this rotation of robot based on estimated RPM
+static float get_rotation_interval_ms() {
 
-  //don't adjust steering if disabled by config mode - or we are in RC deadzone
-  if (steering_disabled == 0 && rc_get_is_lr_in_normal_deadzone() == false) {
-    radius_adjustment_factor = (float)(rc_get_leftright() / (float)NOMINAL_PULSE_RANGE) / LEFT_RIGHT_HEADING_CONTROL_DIVISOR;
-  }
-  
-  float effective_radius_in_cm = accel_mount_radius_cm;
-  
-  effective_radius_in_cm = effective_radius_in_cm + (effective_radius_in_cm * radius_adjustment_factor);
+  //Get rpm from heading estimator
+  float rpm = getRPM();
 
-  float rpm;
-  //use of absolute makes it so we don't need to worry about accel orientation
-  //calculate RPM from g's - derived from "G = 0.00001118 * r * RPM^2"
-  rpm = fabs(get_accel_force_g() - accel_zero_g_offset) * 89445.0f;
-  rpm = rpm / effective_radius_in_cm;
-  rpm = sqrt(rpm);
+  //Prevent divide by zero if rpm is 0
+  if(rpm == 0) return MAX_TRACKING_ROTATION_INTERVAL_US / 1000.0f;
 
+  //Record highest rpm
   if (rpm > highest_rpm || highest_rpm == 0) highest_rpm = rpm;
 
+  //Calculate rotation interval based on rpm and adjustment factor from rc inputs
   float rotation_interval = (1.0f / rpm) * 60 * 1000;
   return rotation_interval;
 }
@@ -105,24 +95,7 @@ static struct melty_parameters_t handle_config_mode(struct melty_parameters_t me
 
   //if forback forward - normal drive (for driver testing - no adjustment of melty parameters)
 
-  //if forback neutral - then do radius adjustment
-  if (melty_parameters.translate_forback == RC_FORBACK_NEUTRAL) {
-
-    //radius adjustment overrides steering
-    melty_parameters.steering_disabled = 1;
-
-    //only adjust if stick is outside deadzone    
-    if (rc_get_is_lr_in_config_deadzone() == false) {
-      //show that we are changing config
-      melty_parameters.led_shimmer = 1;
-
-      float adjustment_factor = (accel_mount_radius_cm * (float)(rc_get_leftright() / (float)NOMINAL_PULSE_RANGE));
-      adjustment_factor = adjustment_factor / LEFT_RIGHT_CONFIG_RADIUS_ADJUST_DIVISOR;
-      accel_mount_radius_cm = accel_mount_radius_cm + adjustment_factor;
-
-      if (accel_mount_radius_cm < ACCEL_MOUNT_RADIUS_MINIMUM_CM) accel_mount_radius_cm = ACCEL_MOUNT_RADIUS_MINIMUM_CM;
-    }    
-  }
+  //if forback neutral - then do radius adjustment (unnecessary for IR sensor)
   
   //if forback backward - do LED heading adjustment (don't translate)
   if (melty_parameters.translate_forback == RC_FORBACK_BACKWARD) {
@@ -139,6 +112,7 @@ static struct melty_parameters_t handle_config_mode(struct melty_parameters_t me
       //show that we are changing config
       melty_parameters.led_shimmer = 1;
 
+      //Adjustment factor to change the LED offset
       float adjustment_factor =  (float)(rc_get_leftright() / (float)NOMINAL_PULSE_RANGE);
       adjustment_factor = adjustment_factor / LEFT_RIGHT_CONFIG_LED_ADJUST_DIVISOR;
       led_offset_percent = led_offset_percent + adjustment_factor;
@@ -165,11 +139,11 @@ static struct melty_parameters_t get_melty_parameters(void) {
   float motor_on_portion = melty_parameters.throttle_percent;
 
   //changes motor_on_portion to fixed value if we are throttling via PWM if DYNAMIC_PWM_MOTOR_ON_PORTION is defined
-#ifdef DYNAMIC_PWM_MOTOR_ON_PORTION
-  if (THROTTLE_TYPE == DYNAMIC_PWM_THROTTLE) {
-    motor_on_portion = DYNAMIC_PWM_MOTOR_ON_PORTION;
-  }
-#endif 
+  #ifdef DYNAMIC_PWM_MOTOR_ON_PORTION
+    if (THROTTLE_TYPE == DYNAMIC_PWM_THROTTLE) {
+      motor_on_portion = DYNAMIC_PWM_MOTOR_ON_PORTION;
+    }
+  #endif 
 
   float led_on_portion = melty_parameters.throttle_percent;  //LED width changed with throttle percent
   if (led_on_portion < 0.10f) led_on_portion = 0.10f;
@@ -182,7 +156,7 @@ static struct melty_parameters_t get_melty_parameters(void) {
     melty_parameters = handle_config_mode(melty_parameters);
   }
 
-  melty_parameters.rotation_interval_us = get_rotation_interval_ms(melty_parameters.steering_disabled) * 1000;
+  melty_parameters.rotation_interval_us = get_rotation_interval_ms() * 1000;
   
   //if under defined RPM - just try to spin up (motors on for full rotation)
   if (melty_parameters.rotation_interval_us > MAX_TRANSLATION_ROTATION_INTERVAL_US) motor_on_portion = 1;
@@ -206,18 +180,27 @@ static struct melty_parameters_t get_melty_parameters(void) {
   melty_parameters.led_stop = melty_parameters.led_start + led_on_us;
 
   //"wraps" led off time if it exceeds rotation length
-  if (melty_parameters.led_stop > melty_parameters.rotation_interval_us)
+  if (melty_parameters.led_stop > melty_parameters.rotation_interval_us){
     melty_parameters.led_stop = melty_parameters.led_stop - melty_parameters.rotation_interval_us;
+  }
+
+  uint16_t target_heading = getTargetHeading();
+  uint16_t current_heading = getHeadingDeg();
+  
+  //Calculate error between target and current headings
+  int16_t heading_error = (target_heading - current_heading + 360) % 360;
+  //Convert heading error into a time offset for the motor window for phase 1
+  unsigned long target_offset_us = (heading_error / 360.0f) * melty_parameters.rotation_interval_us;
+  //Calculate the motor window for phase 2 based on a 180 degree offset from phase 1
+  unsigned long opposite_offset_us = (target_offset_us + (melty_parameters.rotation_interval_us / 2)) % melty_parameters.rotation_interval_us;
 
   //phase 1 timing: for motor_1 in forward translation or motor_2 in reverse
-  //motor "on" period is centered at the halfway point of the rotation cycle (6 o'clock)
-  melty_parameters.motor_start_phase_1 = (melty_parameters.rotation_interval_us / 2) - (motor_on_us / 2);
-  melty_parameters.motor_stop_phase_1 = melty_parameters.motor_start_phase_1 + motor_on_us;
+  melty_parameters.motor_start_phase_1 = target_offset_us - (motor_on_us / 2);
+  melty_parameters.motor_stop_phase_1  = target_offset_us + (motor_on_us / 2);
 
   //phase 2 timing: for motor_2 in forward translation or motor_1 in reverse
-  //180-degree phase shift relative to phase 1, centering the "on" period at the cycle's start/end (12 o'clock)
-  melty_parameters.motor_start_phase_2 = melty_parameters.rotation_interval_us - (motor_on_us / 2);
-  melty_parameters.motor_stop_phase_2 = motor_on_us / 2;
+  melty_parameters.motor_start_phase_2 = opposite_offset_us - (motor_on_us / 2);
+  melty_parameters.motor_stop_phase_2  = opposite_offset_us + (motor_on_us / 2);
 
   //if the battery voltage is low - shimmer the LED to let user know
 #ifdef BATTERY_ALERT_ENABLED
@@ -227,14 +210,24 @@ static struct melty_parameters_t get_melty_parameters(void) {
   return melty_parameters;
 }
 
+//Helper function to check if time is within calculated motor window
+//This function is needed as phase 1 or 2 can wrap at the ends of the rotation interval depending on the target heading
+static bool in_motor_window(unsigned long currentTime, unsigned long start, unsigned long stop) {
+  if (start > stop) {
+    return currentTime >= start || currentTime <= stop;
+  } else {
+    return currentTime >= start && currentTime <= stop;
+  }
+}
+
 //handle translating forward
 static void translate_forward(struct melty_parameters_t melty_parameters, unsigned long time_spent_this_rotation_us) {
-  if (time_spent_this_rotation_us >= melty_parameters.motor_start_phase_1 && time_spent_this_rotation_us <= melty_parameters.motor_stop_phase_1) {
+  if (in_motor_window(time_spent_this_rotation_us, melty_parameters.motor_start_phase_1, melty_parameters.motor_stop_phase_1)) {
     motor_1_on(melty_parameters.throttle_percent);
   } else {
     motor_1_coast();
   }
-  if (time_spent_this_rotation_us >= melty_parameters.motor_start_phase_2 || time_spent_this_rotation_us <= melty_parameters.motor_stop_phase_2) {        
+  if (in_motor_window(time_spent_this_rotation_us, melty_parameters.motor_start_phase_2, melty_parameters.motor_stop_phase_2)) {        
     motor_2_on(melty_parameters.throttle_percent);
   } else {
     motor_2_coast();
@@ -243,12 +236,13 @@ static void translate_forward(struct melty_parameters_t melty_parameters, unsign
 
 //handle translating backward (motor1 and motor2 timings are swapped - offset by 180 degrees)
 static void translate_backward(struct melty_parameters_t melty_parameters, unsigned long time_spent_this_rotation_us) {
-  if (time_spent_this_rotation_us >= melty_parameters.motor_start_phase_2 || time_spent_this_rotation_us <= melty_parameters.motor_stop_phase_2) {
+  if (in_motor_window(time_spent_this_rotation_us, melty_parameters.motor_start_phase_2, melty_parameters.motor_stop_phase_2)) {
     motor_1_on(melty_parameters.throttle_percent);
   } else {
     motor_1_coast();
   }
-  if (time_spent_this_rotation_us >= melty_parameters.motor_start_phase_1 && time_spent_this_rotation_us <= melty_parameters.motor_stop_phase_1) {
+
+  if (in_motor_window(time_spent_this_rotation_us, melty_parameters.motor_start_phase_1, melty_parameters.motor_stop_phase_1)) {
     motor_2_on(melty_parameters.throttle_percent);
   } else {
     motor_2_coast();
@@ -279,7 +273,7 @@ void spin_one_rotation(void) {
   //-initial- assignment of melty parameters
   static struct melty_parameters_t melty_parameters = get_melty_parameters();
 
-  //capture initial time stamp before rotation start (time performing accel sampling / floating point math is included)
+  //capture initial time stamp before rotation start
   unsigned long start_time = micros();
   unsigned long time_spent_this_rotation_us = 0;
 
@@ -288,13 +282,18 @@ void spin_one_rotation(void) {
   cycle_count++;
 
   //the melty parameters are updated either at the beginning of the rotation - or the middle of the rotation (alternating each time)
-  //this is done so that any errors due to the ~1ms accel read / math cycle cancel out any effect on tracking / translational drift
+  //this is done so that any errors due to the heading read/update/math cycle cancel out any effect on tracking / translational drift
   int melty_parameter_update_time_offset_us = 0;
   if (cycle_count % 2 == 1) melty_parameter_update_time_offset_us = melty_parameters.rotation_interval_us / 2;  
   bool melty_parameters_updated_this_rotation = false;
 
   //loop for one rotation of robot
   while (time_spent_this_rotation_us < melty_parameters.rotation_interval_us) {
+
+    //Check for new rising edge on IR sensor
+    if(hasNewEdge()){
+      updateHeading(getEdgeTime()); //Update heading estimator
+    }
 
     //update melty parameters if we haven't / update time has elapsed
     if (melty_parameters_updated_this_rotation == false && time_spent_this_rotation_us > melty_parameter_update_time_offset_us) { 
