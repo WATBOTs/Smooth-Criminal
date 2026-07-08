@@ -73,7 +73,27 @@ static struct melty_parameters_t handle_config_mode(struct melty_parameters_t me
 
   //if forback forward - normal drive (for driver testing - no adjustment of melty parameters)
 
-  //if forback neutral - N/A
+  //if forback neutral - IR Beacon calibration 
+  if (melty_parameters.translate_forback == RC_FORBACK_NEUTRAL) {
+
+    //calibration overrides steering
+    melty_parameters.steering_disabled = 1;
+
+    /*
+    
+    //only adjust if stick is outside deadzone    
+    if (rc_get_is_lr_in_config_deadzone() == false) {
+      //show that we are changing config
+      melty_parameters.led_shimmer = 1;
+
+      float adjustment_factor = (accel_mount_radius_cm * (float)(rc_get_leftright() / (float)NOMINAL_PULSE_RANGE));
+      adjustment_factor = adjustment_factor / LEFT_RIGHT_CONFIG_RADIUS_ADJUST_DIVISOR;
+      accel_mount_radius_cm = accel_mount_radius_cm + adjustment_factor;
+
+      if (accel_mount_radius_cm < ACCEL_MOUNT_RADIUS_MINIMUM_CM) accel_mount_radius_cm = ACCEL_MOUNT_RADIUS_MINIMUM_CM;
+    }
+    */    
+  }
   
   //if forback backward - do LED heading adjustment (don't translate)
   if (melty_parameters.translate_forback == RC_FORBACK_BACKWARD) {
