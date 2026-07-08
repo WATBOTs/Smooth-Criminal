@@ -2,16 +2,17 @@
 #include "melty_config.h"
 #include "heading_estimator.h"
 
-//(In microseconds) Sets how fast the robot must spin before the algorithm begins tracking. Based on time for one revolution.
-const uint32_t REV_TIMEOUT = 1500000;
-
-//Used to determine if an edge was missed. Represents ratio between current period and previous period between edges.
-const uint32_t MISSED_EDGE_RATIO = 2; 
-
 uint32_t sensorEdgeTime[2] = {0};
 uint8_t  numEdges = 0;
 int16_t heading = 0;
 float rpm = 0;
+
+//Used to access timestamps for debugging if defined
+#ifdef SERIAL_DEBUG_OUTPUT
+  uint32_t getEstimatorEdgeTime(int index) {
+    return sensorEdgeTime[index];
+  }
+#endif
 
 //Called when IR sensor detects a new edge. Updates stored timestamps 
 void updateHeading(uint32_t newEdge) {
