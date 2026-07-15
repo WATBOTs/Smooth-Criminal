@@ -184,6 +184,11 @@ static struct melty_parameters_t get_melty_parameters(void) {
 
   uint16_t target_heading = getTargetHeading();
   uint16_t current_heading = getHeadingDeg();
+
+  // Remain at current heading if RC is within deadzone (no input)
+  if(target_heading == UINT16_MAX){
+    target_heading == current_heading;
+  }
   
   //Calculate error between target and current headings
   int16_t heading_error = (target_heading - current_heading + 360) % 360;

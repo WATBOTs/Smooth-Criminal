@@ -209,7 +209,7 @@ int rc_get_leftright() {
 //   0°  = forward, 90° = right, 180° = backward, 270° = left.
 // Returns -1.0 when the stick is inside the deadzone, signalling that the
 // caller should hold the current heading rather than command a new one.
-float getTargetHeading() {
+uint16_t getTargetHeading() {
   lock_rc_data();
   unsigned long fb_pulse = forback_rc_channel.pulse_length;
   unsigned long lr_pulse  = leftright_rc_channel.pulse_length;
@@ -222,7 +222,7 @@ float getTargetHeading() {
 
   // If the stick magnitude is within the deadzone, report no heading intent
   float magnitude = sqrtf(lr * lr + fb * fb);
-  if (magnitude < (float)LR_NORMAL_DEADZONE_WIDTH) return -1.0f;
+  if (magnitude < (float)LR_NORMAL_DEADZONE_WIDTH) return UINT16_MAX;
 
   // atan2(x, y) gives angle from the +Y (forward) axis, rotating CW toward +X
   // (right), which matches standard compass / robot heading convention.
@@ -232,7 +232,7 @@ float getTargetHeading() {
   // Normalise to [0, 360)
   if (heading_deg < 0.0f) heading_deg += 360.0f;
 
-  return heading_deg;
+  return (uint16_t)heading_deg;
 }
 
 // getTranslationSpeed()
