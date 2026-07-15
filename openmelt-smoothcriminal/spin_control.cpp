@@ -73,7 +73,27 @@ static struct melty_parameters_t handle_config_mode(struct melty_parameters_t me
 
   //if forback forward - normal drive (for driver testing - no adjustment of melty parameters)
 
-  //if forback neutral - N/A
+  //if forback neutral - IR Beacon calibration 
+  if (melty_parameters.translate_forback == RC_FORBACK_NEUTRAL) {
+
+    //calibration overrides steering
+    melty_parameters.steering_disabled = 1;
+
+    /*
+    
+    //only adjust if stick is outside deadzone    
+    if (rc_get_is_lr_in_config_deadzone() == false) {
+      //show that we are changing config
+      melty_parameters.led_shimmer = 1;
+
+      float adjustment_factor = (accel_mount_radius_cm * (float)(rc_get_leftright() / (float)NOMINAL_PULSE_RANGE));
+      adjustment_factor = adjustment_factor / LEFT_RIGHT_CONFIG_RADIUS_ADJUST_DIVISOR;
+      accel_mount_radius_cm = accel_mount_radius_cm + adjustment_factor;
+
+      if (accel_mount_radius_cm < ACCEL_MOUNT_RADIUS_MINIMUM_CM) accel_mount_radius_cm = ACCEL_MOUNT_RADIUS_MINIMUM_CM;
+    }
+    */    
+  }
   
   //if forback backward - do LED heading adjustment (don't translate)
   if (melty_parameters.translate_forback == RC_FORBACK_BACKWARD) {
@@ -265,6 +285,11 @@ void spin_one_rotation(void) {
   if (cycle_count % 2 == 1) melty_parameter_update_time_offset_us = melty_parameters.rotation_interval_us / 2;  
   bool melty_parameters_updated_this_rotation = false;
 
+  #ifdef SERIAL_DEBUG_OUTPUT //Increment cycle count for serial debug output if defined
+    static unsigned int debug_cycle_count = 0;
+    debug_cycle_count++;
+  #endif
+
   //loop for one rotation of robot
   while (time_spent_this_rotation_us < melty_parameters.rotation_interval_us) {
 
@@ -278,6 +303,25 @@ void spin_one_rotation(void) {
       melty_parameters = get_melty_parameters();
       melty_parameters_updated_this_rotation = true;
     }
+
+    //Log data to USB Serial if defined in melty_config.h
+    #ifdef SERIAL_DEBUG_OUTPUT
+      if(debug_cycle_count % SERIAL_DEBUG_INTERVAL == 0){
+        Serial.print("RPM: "); Serial.print(getRPM());
+        Serial.print("  Est. Heading: "); Serial.print(getHeadingDeg());
+        Serial.print("  Target. Heading: "); Serial.print(getTargetHeading());
+        Serial.print("  RC Throttle: "); Serial.print(rc_get_throttle_percent());
+        Serial.print("  RC L/R: "); Serial.print(rc_get_leftright());
+        Serial.print("  RC F/B: "); Serial.print(rc_get_forback());
+        Serial.print("  Motor 1 Phase Start: "); Serial.print(melty_parameters.motor_start_phase_1);
+        Serial.print("  Motor 1 Phase Stop: "); Serial.print(melty_parameters.motor_stop_phase_1);
+        Serial.print("  Motor 2 Phase Start: "); Serial.print(melty_parameters.motor_start_phase_2);
+        Serial.print("  Motor 2 Phase Stop: "); Serial.print(melty_parameters.motor_stop_phase_2);
+        Serial.print("  Curr. Timestamp: "); Serial.print(getEstimatorEdgeTime(0));
+        Serial.print("  Prev. Timestamp "); Serial.print(getEstimatorEdgeTime(1));
+        Serial.println("");
+      }
+    #endif
 
     //if translation direction is RC_FORBACK_NEUTRAL - robot cycles between forward and reverse translation for net zero translation
     //if motor 2 (or motor 1) is not present - control sequence remains identical (signal still generated for non-connected motor)

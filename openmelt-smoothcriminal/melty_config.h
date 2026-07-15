@@ -10,6 +10,8 @@
 
 //----------DIAGNOSTICS----------
 //#define JUST_DO_DIAGNOSTIC_LOOP                 //Disables the robot / just displays config / battery voltage / RC info via serial
+#define SERIAL_DEBUG_OUTPUT                       //Logs RPM, estimated/target heading, beacon edge timestamps, pulse firing windows, and RC inputs over USB serial at a configurable interval
+#define SERIAL_DEBUG_INTERVAL                     //Defines the interval of how often the serial debug output will log the data.
 
 //----------EEPROM----------
 #define ENABLE_EEPROM_STORAGE                     //Comment out this to disable EEPROM (for ARM)
@@ -30,6 +32,8 @@
 
 #define MIN_TRANSLATION_RPM 400                   //full power spin in below this number (increasing can reduce spin-up time)
 
+#define REV_TIMEOUT 1500000                       //(In microseconds) Sets how fast the robot must spin before the algorithm begins tracking. Based on time for one revolution.
+#define MISSED_EDGE_RATIO 2                       //Used to determine if an edge was missed. Represents ratio between current period and previous period between edges.
 
 //----------PIN MAPPINGS----------
 //RC pins must be Arduino interrupt pins

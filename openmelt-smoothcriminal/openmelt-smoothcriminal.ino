@@ -76,7 +76,6 @@ void setup() {
 //dumps out diagnostics info
 static void echo_diagnostics() {
 
-  Serial.print("Raw Accel G: "); Serial.print(get_accel_force_g());
   Serial.print("  RC Health: "); Serial.print(rc_signal_is_healthy());
   Serial.print("  RC Throttle: "); Serial.print(rc_get_throttle_percent());
   Serial.print("  RC L/R: "); Serial.print(rc_get_leftright());
